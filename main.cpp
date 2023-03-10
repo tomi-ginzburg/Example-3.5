@@ -92,7 +92,6 @@ void inputsInit()
     bButton.mode(PullDown);
     cButton.mode(PullDown);
     dButton.mode(PullDown);
-    sirenPin = LOW;
 }
 
 void outputsInit()
@@ -100,6 +99,7 @@ void outputsInit()
     alarmLed = OFF;
     incorrectCodeLed = OFF;
     systemBlockedLed = OFF;
+    sirenPin = OFF;
 }
 
 void alarmActivationUpdate()
@@ -141,7 +141,7 @@ void alarmActivationUpdate()
     }    
     if( alarmState ) { 
         accumulatedTimeAlarm = accumulatedTimeAlarm + TIME_INCREMENT_MS;                               
-        sirenPin = HIGH;                                        
+        sirenPin = ON;                                        
     
         if( gasDetectorState && overTempDetectorState ) {
             if( accumulatedTimeAlarm >= BLINKING_TIME_GAS_AND_OVER_TEMP_ALARM ) {
