@@ -92,6 +92,7 @@ void inputsInit()
     bButton.mode(PullDown);
     cButton.mode(PullDown);
     dButton.mode(PullDown);
+    sirenPin = LOW;
 }
 
 void outputsInit()
