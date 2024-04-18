@@ -5,32 +5,54 @@
 
 //=====[Defines]===============================================================
 
-#define NUMBER_OF_KEYS                           4
-#define BLINKING_TIME_GAS_ALARM               1000
-#define BLINKING_TIME_OVER_TEMP_ALARM          500
-#define BLINKING_TIME_GAS_AND_OVER_TEMP_ALARM  100
+#define NUMBER_OF_KEYS                          4
+#define BLINKING_TIME_GAS_ALARM                 1000
+#define BLINKING_TIME_OVER_TEMP_ALARM           500
+#define BLINKING_TIME_GAS_AND_OVER_TEMP_ALARM   100
 #define NUMBER_OF_AVG_SAMPLES                   100
 #define OVER_TEMP_LEVEL                         50
 #define TIME_INCREMENT_MS                       10
 
+// Agrego definiciones para BusIn codeButtons
+#define ENTER                                   0
+#define A_BUTTON                                1
+#define B_BUTTON                                2
+#define C_BUTTON                                3
+#define D_BUTTON                                4
+#define NEW_ATTEMPT_ENABLE                      0b11110
+
+// Agrego definiciones para BusOut outs
+#define ALARM_LED                               0
+#define INCORRECT_CODE_LED                      1
+#define SYSTEM_BLOCKED_LED                      2
+#define SIREN_PIN                               3
+#define INIT_OUTPUTS                            0b1000
+
 //=====[Declaration and initialization of public global objects]===============
 
-DigitalIn enterButton(BUTTON1);
 DigitalIn alarmTestButton(D2);
-DigitalIn aButton(D4);
-DigitalIn bButton(D5);
-DigitalIn cButton(D6);
-DigitalIn dButton(D7);
-DigitalIn mq2(PE_12);
 
-DigitalOut alarmLed(LED1);
-DigitalOut incorrectCodeLed(LED3);
-DigitalOut systemBlockedLed(LED2);
+// Uso BusIn para manejar la entrada del codigo de la alarma
+BusIn codeButtons(BUTTON1,D4,D5,D6,D7);
 
-DigitalOut sirenPin(PE_10);
+//DigitalIn mq2(PE_12);
+BusOut outs(LED1,LED3,LED2,PE_10); 
 
+
+/*
+ * La comunicacion se realiza a partir de la clase UbufferedSerial que a su vez hereda de SerialBase, FileHandle y NonCopyable
+ * Se crea una instancia de un puerto serie con los pines USBTX, USBRX t un baudrate de 115200
+ * Se usan los metodos read y write para leer y escribir a traves del serial monitor
+ * ¿DIFERENCIAS CON PRINTF? la comunicacion se realiza a traves de los pines USATX-USBRX y al baudrate configurado
+ */
 UnbufferedSerial uartUsb(USBTX, USBRX, 115200);
 
+
+/*
+ * Para los detectores se crean objetos de la clase AnalogIn
+ * De ella se utilizara unicamnte el metodo read que devuelve un float en el rango [0.0 1.0]
+ * La clase contiene otros metodos de lectura para obtener otros formatos
+ */
 AnalogIn potentiometer(A0);
 AnalogIn lm35(A1);
 
@@ -71,6 +93,16 @@ float analogReadingScaledWithTheLM35Formula( float analogReading );
 
 //=====[Main function, the program entry point after power on or reset]========
 
+/* FUNCIONAMIENTO:
+ * El prototipo esta formado por:
+ * - Entradas analogicas(sensores): gas(potenciometro), temperatura
+ * - Entradas digitales(botones): para el ingreso del codigo y para el testeo de la alarma
+ * - Salida digital(buzzer): para la alarma
+ * Primero se inicializan los IO. Luego se revisa en el loop el estado de las entradas analogicas y se las compara contra el valor de referencia
+ * Si algun sesnor da mayor al valor de referencia o el boton de testeo de alarma esta en alto se enciende la alarma
+ * Luego se revisan los botones del codigo para ver si se introdujo el codigo correcto para deshabilitar la alarma
+ * Finalmente se revisa si en la consola se esta pidiendo algun dato  
+ */
 int main()
 {
     inputsInit();
@@ -88,18 +120,12 @@ int main()
 void inputsInit()
 {
     alarmTestButton.mode(PullDown);
-    aButton.mode(PullDown);
-    bButton.mode(PullDown);
-    cButton.mode(PullDown);
-    dButton.mode(PullDown);
+    codeButtons.mode(PullDown);
 }
 
 void outputsInit()
 {
-    alarmLed = OFF;
-    incorrectCodeLed = OFF;
-    systemBlockedLed = OFF;
-    sirenPin = OFF;
+    outs = INIT_OUTPUTS;
 }
 
 void alarmActivationUpdate()
@@ -126,7 +152,7 @@ void alarmActivationUpdate()
         overTempDetector = OFF;
     }
 
-    if( !mq2) {
+    if( potentiometer > 0.5) {
         gasDetectorState = ON;
         alarmState = ON;
     }
@@ -141,53 +167,53 @@ void alarmActivationUpdate()
     }    
     if( alarmState ) { 
         accumulatedTimeAlarm = accumulatedTimeAlarm + TIME_INCREMENT_MS;                               
-        sirenPin = ON;                                        
+        outs[SIREN_PIN] = OFF;                                        
     
         if( gasDetectorState && overTempDetectorState ) {
             if( accumulatedTimeAlarm >= BLINKING_TIME_GAS_AND_OVER_TEMP_ALARM ) {
                 accumulatedTimeAlarm = 0;
-                alarmLed = !alarmLed;
+                outs[ALARM_LED] = !outs[ALARM_LED];
             }
         } else if( gasDetectorState ) {
             if( accumulatedTimeAlarm >= BLINKING_TIME_GAS_ALARM ) {
                 accumulatedTimeAlarm = 0;
-                alarmLed = !alarmLed;
+                outs[ALARM_LED] = !outs[ALARM_LED];
             }
         } else if ( overTempDetectorState ) {
             if( accumulatedTimeAlarm >= BLINKING_TIME_OVER_TEMP_ALARM  ) {
                 accumulatedTimeAlarm = 0;
-                alarmLed = !alarmLed;
+                outs[ALARM_LED] = !outs[ALARM_LED];
             }
         }
     } else{
-        alarmLed = OFF;
+        outs[ALARM_LED] = OFF;
+        outs[SIREN_PIN] = ON;    
         gasDetectorState = OFF;
-        overTempDetectorState = OFF;
-        sirenPin = OFF;                                 
+        overTempDetectorState = OFF;                             
     }
 }
 
 void alarmDeactivationUpdate()
 {
     if ( numberOfIncorrectCodes < 5 ) {
-        if ( aButton && bButton && cButton && dButton && !enterButton ) {
-            incorrectCodeLed = OFF;
+        if ( codeButtons == NEW_ATTEMPT_ENABLE ) {
+            outs[INCORRECT_CODE_LED] = OFF;
         }
-        if ( enterButton && !incorrectCodeLed && alarmState ) {
-            buttonsPressed[0] = aButton;
-            buttonsPressed[1] = bButton;
-            buttonsPressed[2] = cButton;
-            buttonsPressed[3] = dButton;
+        if ( codeButtons[ENTER] && !outs[INCORRECT_CODE_LED] && alarmState ) {
+            buttonsPressed[0] = codeButtons[A_BUTTON];
+            buttonsPressed[1] = codeButtons[B_BUTTON];
+            buttonsPressed[2] = codeButtons[C_BUTTON];
+            buttonsPressed[3] = codeButtons[D_BUTTON];
             if ( areEqual() ) {
                 alarmState = OFF;
                 numberOfIncorrectCodes = 0;
             } else {
-                incorrectCodeLed = ON;
+                outs[INCORRECT_CODE_LED] = ON;
                 numberOfIncorrectCodes++;
             }
         }
     } else {
-        systemBlockedLed = ON;
+        outs[SYSTEM_BLOCKED_LED] = ON;
     }
 }
 
@@ -208,7 +234,7 @@ void uartTask()
             break;
 
         case '2':
-            if ( !mq2 ) {
+            if ( potentiometer > 0.5 ) {
                 uartUsb.write( "Gas is being detected\r\n", 22);
             } else {
                 uartUsb.write( "Gas is not being detected\r\n", 27);
@@ -259,11 +285,11 @@ void uartTask()
             if ( incorrectCode == false ) {
                 uartUsb.write( "\r\nThe code is correct\r\n\r\n", 25 );
                 alarmState = OFF;
-                incorrectCodeLed = OFF;
+                outs[INCORRECT_CODE_LED] = OFF;
                 numberOfIncorrectCodes = 0;
             } else {
                 uartUsb.write( "\r\nThe code is incorrect\r\n\r\n", 27 );
-                incorrectCodeLed = ON;
+                outs[INCORRECT_CODE_LED] = ON;
                 numberOfIncorrectCodes++;
             }                
             break;
